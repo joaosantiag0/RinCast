@@ -58,6 +58,7 @@ json HeadsetSettings::ToJson() const {
             {"keyboardPos", keyboardPos},
             {"keyboardRot", keyboardRot},
             {"keyboardSize", keyboardSize},
+            {"monitorLayout", monitorLayout},
             {"cloudServer", cloudServer},
             {"cloudRefreshToken", cloudRefreshToken},
             {"cloudUserName", cloudUserName},
@@ -129,6 +130,7 @@ void HeadsetSettings::FromJson(const json& j) {
     get("keyboardPos", keyboardPos);
     get("keyboardRot", keyboardRot);
     get("keyboardSize", keyboardSize);
+    get("monitorLayout", monitorLayout);
     get("cloudServer", cloudServer);
     get("cloudRefreshToken", cloudRefreshToken);
     get("cloudUserName", cloudUserName);

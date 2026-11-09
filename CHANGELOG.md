@@ -9,6 +9,7 @@ Notable changes to RinCast. Versions follow [Semantic Versioning](https://semver
 - Desktop: "Send mouse input" toggle under Desktop, allowing users to view PC monitors without passing laser pointer movements, clicks or scrolls to the computer.
 - Physical USB and Bluetooth keyboard and mouse passthrough directly from the headset to the connected computer while in Desktop mode, with the mouse cursor bounded to virtual monitors.
 - Physical keyboard passthrough cutout option in the headset menu to view the desk keyboard in VR and Desktop spaces, calibrated by tracing across the front edge of the keyboard.
+- The Desktop monitor layout is saved relative to the keyboard passthrough portal, so redrawing the portal (or reconnecting) puts the monitors back where they were.
 
 ### Changed
 

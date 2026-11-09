@@ -187,6 +187,10 @@ class App {
     void ConfigureVrStream(const json& stream);
     void LayoutMonitors(bool force);
     void LayoutHome(bool force);
+    // Monitor layout anchored to the keyboard passthrough portal.
+    bool KeyboardFrame(Pose& out) const;
+    void SaveMonitorLayout();
+    void RestoreMonitorLayout();
     void UpdateMode(float dt);
     void EnterMode(Mode m);
     void LatchVideo(const FrameState& frame);
@@ -280,6 +284,7 @@ class App {
     std::map<uint8_t, bool> m_monitorFresh;
     bool m_monitorsVisible = true;
     bool m_monitorsLaidOut = false;
+    bool m_wasDragging = false;  // to save the layout when a drag ends
     int m_vrEyeWidth = 0, m_vrEyeHeight = 0;
     rc::VideoCodec m_vrCodec = rc::VideoCodec::HEVC;
     // Foveated encoding: the stream's frames are squeezed (see rc::VrFoveationMetadata);

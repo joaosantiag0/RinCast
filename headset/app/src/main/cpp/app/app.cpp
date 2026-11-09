@@ -719,6 +719,7 @@ void App::ExitVr(bool byUser) {
 void App::Recenter() {
     LayoutMonitors(true);
     LayoutHome(true);
+    SaveMonitorLayout();  // the re-arranged arc becomes the saved layout
 }
 
 void App::StartKeyboardCutoutDraw() {
@@ -1391,6 +1392,7 @@ void App::ConfigureDesktopStreams(const json& streams) {
     }
     m_desktopStreams = next;
     LayoutMonitors(!m_monitorsLaidOut);
+    if (!m_monitorsLaidOut) RestoreMonitorLayout();  // first layout of this connection
     m_monitorsLaidOut = true;
     ShowMonitors(m_monitorsVisible);
 }
@@ -1446,6 +1448,76 @@ void App::CreateVrSwapchain() {
 // ---------------------------------------------------------------------------
 // Layout
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Monitor layout anchored to the keyboard passthrough portal
+// ---------------------------------------------------------------------------
+
+static std::string MonitorLayoutKey(const DesktopStreamInfo& d) {
+    if (!d.monitorId.empty()) return d.monitorId;
+    if (!d.name.empty()) return d.name;
+    return std::to_string(d.streamId);
+}
+
+bool App::KeyboardFrame(Pose& out) const {
+    if (!m_settings.keyboardCutout || m_settings.keyboardPos.size() < 3 ||
+        m_settings.keyboardRot.size() < 4) {
+        return false;
+    }
+    out = {Quat{m_settings.keyboardRot[0], m_settings.keyboardRot[1], m_settings.keyboardRot[2],
+                m_settings.keyboardRot[3]},
+           Vec3{m_settings.keyboardPos[0], m_settings.keyboardPos[1], m_settings.keyboardPos[2]}};
+    return true;
+}
+
+void App::SaveMonitorLayout() {
+    Pose kb;
+    if (!KeyboardFrame(kb)) return;  // nothing to anchor to yet
+    const Pose inv = kb.Inverse();
+    json layout = json::object();
+    for (const auto& [id, d] : m_desktopStreams) {
+        Window* w = m_windows.Find("monitor-" + std::to_string(id));
+        if (!w) continue;
+        const Pose rel = inv * w->pose;
+        layout[MonitorLayoutKey(d)] = {
+            {"pos", {rel.position.x, rel.position.y, rel.position.z}},
+            {"rot", {rel.orientation.x, rel.orientation.y, rel.orientation.z, rel.orientation.w}},
+            {"width", w->widthM},
+        };
+    }
+    if (layout.empty()) return;
+    m_settings.monitorLayout = std::move(layout);
+    SaveSettings();
+    RC_LOGD("Monitor layout saved: %zu monitors (keyboard frame)", m_settings.monitorLayout.size());
+}
+
+void App::RestoreMonitorLayout() {
+    Pose kb;
+    if (!KeyboardFrame(kb) || !m_settings.monitorLayout.is_object()) return;
+    for (const auto& [id, d] : m_desktopStreams) {
+        auto it = m_settings.monitorLayout.find(MonitorLayoutKey(d));
+        if (it == m_settings.monitorLayout.end()) continue;
+        Window* w = m_windows.Find("monitor-" + std::to_string(id));
+        if (!w) continue;
+        try {
+            const json& e = it.value();
+            const json& p = e.at("pos");
+            const json& r = e.at("rot");
+            if (p.size() < 3 || r.size() < 4) continue;
+            const Pose rel{
+                Quat{r[0].get<float>(), r[1].get<float>(), r[2].get<float>(), r[3].get<float>()},
+                Vec3{p[0].get<float>(), p[1].get<float>(), p[2].get<float>()}};
+            w->pose = kb * rel;
+            if (e.contains("width")) {
+                const float width = e.at("width").get<float>();
+                if (width > 0.f) w->widthM = width;
+            }
+            RC_LOGI("Monitor layout restored for '%s'", MonitorLayoutKey(d).c_str());
+        } catch (...) {
+            // A truncated or older entry just leaves that monitor on the default arc.
+        }
+    }
+}
 
 void App::LayoutHome(bool force) {
     Window* home = m_windows.Find("home");
@@ -1725,10 +1797,15 @@ void App::UpdateInput(const FrameState& frame, float dt) {
                     if (Length(p2 - p1) > 0.05f) {
                         const CutoutGeometry geo = ComputeCutoutGeometry(p1, p2, frame.head);
 
+                        // Snapshot the monitors in the old keyboard frame, then re-apply them
+                        // to the new one: redrawing the portal keeps the arrangement anchored
+                        // to the physical keyboard instead of losing it.
+                        SaveMonitorLayout();
                         m_settings.keyboardPos = {geo.center.x, geo.center.y, geo.center.z};
                         m_settings.keyboardRot = {geo.rot.x, geo.rot.y, geo.rot.z, geo.rot.w};
                         m_settings.keyboardSize = {geo.width, geo.depth};
                         m_settings.keyboardCutout = true;
+                        RestoreMonitorLayout();
                         SaveSettings();
                         if (m_settings.haptics) m_input.Vibrate(h, 0.4f, 0.04f);
                         Platform::PlaySound(Platform::Sound::Click);
@@ -1758,6 +1835,10 @@ void App::UpdateInput(const FrameState& frame, float dt) {
     }
 
     m_windows.Update(m_rays, m_head, dt, m_time, m_hits);
+    // A finished drag/resize is when the monitor arrangement changes: persist it.
+    const bool dragging = m_windows.Dragging();
+    if (m_wasDragging && !dragging && m_mode == Mode::Desktop) SaveMonitorLayout();
+    m_wasDragging = dragging;
     if (m_settings.haptics && m_windows.ConsumeHaptic()) m_input.Vibrate(m_windows.HapticHand(), 0.15f, 0.015f);
     if (m_windows.UiContext().ConsumeHoverChange() && m_settings.haptics) m_input.Vibrate(m_windows.HapticHand(), 0.06f, 0.008f);
     if (const std::string speech = m_windows.UiContext().ConsumeSpeech(); m_settings.readAloud && !speech.empty()) Platform::Speak(speech);

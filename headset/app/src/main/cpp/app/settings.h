@@ -68,6 +68,10 @@ struct HeadsetSettings {
     std::vector<float> keyboardPos = {0.f, -0.3f, -0.45f};
     std::vector<float> keyboardRot = {-0.7071068f, 0.f, 0.f, 0.7071068f};
     std::vector<float> keyboardSize = {0.42f, 0.18f};
+    // Monitor poses in the keyboard portal's local frame, keyed by the PC's stable
+    // monitor id. Redrawing the portal re-applies them, so the monitors keep their
+    // arrangement relative to the physical keyboard instead of being laid out again.
+    nlohmann::json monitorLayout = nlohmann::json::object();
 
     // Account
     std::string cloudServer = "https://rincast.com";
