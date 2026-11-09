@@ -205,7 +205,7 @@ int32_t App::HandleAndroidInput(const AInputEvent* event) {
     if (type == AINPUT_EVENT_TYPE_KEY) {
         return OnPhysicalKey(AKeyEvent_getKeyCode(event), AKeyEvent_getScanCode(event),
                              AKeyEvent_getMetaState(event), AKeyEvent_getAction(event),
-                             AKeyEvent_getFlags(event))
+                             AKeyEvent_getFlags(event), AKeyEvent_getRepeatCount(event))
                    ? 1
                    : 0;
     } else if (type == AINPUT_EVENT_TYPE_MOTION) {
@@ -311,7 +311,7 @@ void App::SyncModifiers(int32_t metaState, uint16_t skipVk) {
 }
 
 bool App::OnPhysicalKey(int32_t keyCode, int32_t scanCode, int32_t metaState, int32_t action,
-                        int32_t flags) {
+                        int32_t flags, int32_t repeatCount) {
     // Volume, power and headset-hook keys belong to the headset, not to the PC.
     if (keyCode == AKEYCODE_VOLUME_UP || keyCode == AKEYCODE_VOLUME_DOWN ||
         keyCode == AKEYCODE_VOLUME_MUTE || keyCode == AKEYCODE_POWER ||
@@ -341,7 +341,7 @@ bool App::OnPhysicalKey(int32_t keyCode, int32_t scanCode, int32_t metaState, in
     // key-up is applied, so it still claims the modifier is held on that event.
     const bool isModifier = vk == 0x10 || vk == 0x11 || vk == 0x12 || vk == 0x5B;
     SyncModifiers(metaState, isModifier ? vk : 0);
-    OnKey(vk, action == AKEY_EVENT_ACTION_DOWN);
+    OnKey(vk, action == AKEY_EVENT_ACTION_DOWN, repeatCount);
     return true;
 }
 
@@ -855,15 +855,39 @@ void App::OnMouseWheel(float dx, float dy) {
     m_client.SendControl({{"type", rc::msg::kMouseWheel}, {"dx", dx}, {"dy", dy * m_settings.scrollSpeed}});
 }
 
-void App::OnKey(uint16_t vk, bool down) {
+// Keys a real keyboard repeats while held. Keep this to editing/navigation: a
+// headset's repeat rate varies and flooding the PC with repeated letters is worse
+// than typing one.
+static bool IsRepeatableKey(uint16_t vk) {
+    switch (vk) {
+        case 0x08:                                      // Backspace
+        case 0x2E:                                      // Delete
+        case 0x25: case 0x26: case 0x27: case 0x28:    // Left / Up / Right / Down
+        case 0x21: case 0x22: case 0x24: case 0x23:    // PageUp / PageDown / Home / End
+            return true;
+        default:
+            return false;
+    }
+}
+
+void App::OnKey(uint16_t vk, bool down, int32_t repeatCount) {
     if (m_mode != Mode::Desktop || vk == 0) return;
     // Hold the lock through the send so down/up from the two input threads can't be
     // reordered: a late key-down after its key-up would leave the key stuck on the PC.
     std::lock_guard lock(m_keysMutex);
-    if (down) {
-        if (!m_keysDown.insert(vk).second) return;
-    } else {
+    if (!down) {
+        m_lastRepeatCount.erase(vk);
         if (!m_keysDown.erase(vk)) return;
+    } else if (!m_keysDown.insert(vk).second) {
+        // Android sends ACTION_DOWN with a growing repeatCount while a key is held.
+        // Forward those repeats for the keys above; the count also drops the same event
+        // if both the native input queue and Java dispatch happen to see it.
+        if (repeatCount <= 0 || !IsRepeatableKey(vk)) return;
+        if (m_lastRepeatCount[vk] == repeatCount) return;
+        m_lastRepeatCount[vk] = repeatCount;
+        RC_LOGD("Physical key repeat: vk 0x%X (%d)", vk, repeatCount);
+    } else {
+        m_lastRepeatCount.erase(vk);  // a fresh press restarts the repeat sequence
     }
     m_client.SendControl({{"type", rc::msg::kKey}, {"vk", vk}, {"down", down}});
 }

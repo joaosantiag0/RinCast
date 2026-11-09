@@ -197,9 +197,12 @@ JNIEXPORT void JNICALL Java_app_rincast_vr_MainActivity_nativeOnMouseWheel(JNIEn
 }
 
 JNIEXPORT jboolean JNICALL Java_app_rincast_vr_MainActivity_nativeOnPhysicalKey(
-    JNIEnv*, jclass, jint keyCode, jint scanCode, jint metaState, jint action, jint flags) {
+    JNIEnv*, jclass, jint keyCode, jint scanCode, jint metaState, jint action, jint flags,
+    jint repeatCount) {
     if (rv::App* app = rv::App::Instance()) {
-        return app->OnPhysicalKey(keyCode, scanCode, metaState, action, flags) ? JNI_TRUE : JNI_FALSE;
+        return app->OnPhysicalKey(keyCode, scanCode, metaState, action, flags, repeatCount)
+                   ? JNI_TRUE
+                   : JNI_FALSE;
     }
     return JNI_FALSE;
 }

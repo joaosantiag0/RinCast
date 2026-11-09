@@ -472,7 +472,7 @@ public class MainActivity extends NativeActivity {
         // NativeActivity's input queue sees most physical keys first. Let native code map
         // them, raw scan codes included; OnPhysicalKey deduplicates events seen twice.
         if (nativeOnPhysicalKey(keyCode, event.getScanCode(), event.getMetaState(),
-                                event.getAction(), event.getFlags())) {
+                                event.getAction(), event.getFlags(), event.getRepeatCount())) {
             return true;
         }
         // Dead keys and composed accents can arrive as ACTION_MULTIPLE or with no key
@@ -498,7 +498,7 @@ public class MainActivity extends NativeActivity {
     private static native void nativeOnMouseButton(int button, boolean down);
     private static native void nativeOnMouseWheel(float dx, float dy);
     private static native boolean nativeOnPhysicalKey(int keyCode, int scanCode, int metaState,
-                                                      int action, int flags);
+                                                      int action, int flags, int repeatCount);
     private static native void nativeOnText(String text);
     private static native void nativeReleaseAllKeys();
 }

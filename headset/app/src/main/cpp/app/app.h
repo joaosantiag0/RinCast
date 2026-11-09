@@ -82,7 +82,7 @@ class App {
     // queue or MainActivity.dispatchKeyEvent. Both paths may see the same event; OnKey
     // deduplicates it. Returns false when Java should try to send the event as text.
     bool OnPhysicalKey(int32_t keyCode, int32_t scanCode, int32_t metaState, int32_t action,
-                       int32_t flags);
+                       int32_t flags, int32_t repeatCount);
 #endif
 
     // ---- used by the UI builders (screens.cpp) ----
@@ -134,7 +134,7 @@ class App {
     void OnMouseMove(float dx, float dy);
     void OnMouseButton(int button, bool down);
     void OnMouseWheel(float dx, float dy);
-    void OnKey(uint16_t vk, bool down);
+    void OnKey(uint16_t vk, bool down, int32_t repeatCount = 0);
     void OnText(const std::string& text);
     void ReleaseAllKeys();
     void PostNotice(const std::string& text, const std::string& level = "info", const std::string& action = {});
@@ -384,6 +384,9 @@ class App {
     // Key events arrive on the native input queue thread and on the Java UI thread.
     std::mutex m_keysMutex;
     std::set<uint16_t> m_keysDown;
+    // Last forwarded auto-repeat count per key, to drop an event seen by both input
+    // paths without dropping real repeats (which have increasing counts).
+    std::map<uint16_t, int32_t> m_lastRepeatCount;
 #ifdef __ANDROID__
     // Android reports the held modifiers on every key event. Reconcile them with the
     // keys we actually sent, so a dropped key-up (common with Bluetooth keyboards) can't
