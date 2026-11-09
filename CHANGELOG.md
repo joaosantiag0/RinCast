@@ -44,7 +44,9 @@ Notable changes to RinCast. Versions follow [Semantic Versioning](https://semver
   them without a key code. Physical keys now fall back to the raw HID scan code, so those
   keys reach the PC as the `[ ] ; ' \ , . /` positions and the PC's own layout produces the
   accents; `ACTION_MULTIPLE` composed characters are sent as text.
-
+- Holding Backspace, Delete, an arrow key, or Home/End/PageUp/PageDown on a physical
+  keyboard only sent one press. Auto-repeat events are now forwarded, so those keys
+  repeat while held. Letters stay one-shot so a headset's repeat rate can't flood the PC.
 
 ## 1.1.2 - 2026-11-07
 
