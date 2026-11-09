@@ -93,15 +93,10 @@ inline Quat Slerp(Quat a, Quat b, float t) {
     const float wa = std::sin((1 - t) * th) / s, wb = std::sin(t * th) / s;
     return {a.x * wa + b.x * wb, a.y * wa + b.y * wb, a.z * wa + b.z * wb, a.w * wa + b.w * wb};
 }
-// Rotation that looks along `forward` (-Z) with `up`.
-inline Quat LookRotation(const Vec3& forward, const Vec3& up = {0, 1, 0}) {
-    const Vec3 f = Normalize(forward);
-    const Vec3 r = Normalize(Cross(up, -f));
-    const Vec3 u = Cross(-f, r);
-    // Rotation matrix columns: r, u, -f
-    const float m00 = r.x, m01 = u.x, m02 = -f.x;
-    const float m10 = r.y, m11 = u.y, m12 = -f.y;
-    const float m20 = r.z, m21 = u.z, m22 = -f.z;
+inline Quat QuatFromColumns(const Vec3& c0, const Vec3& c1, const Vec3& c2) {
+    const float m00 = c0.x, m01 = c1.x, m02 = c2.x;
+    const float m10 = c0.y, m11 = c1.y, m12 = c2.y;
+    const float m20 = c0.z, m21 = c1.z, m22 = c2.z;
     const float tr = m00 + m11 + m22;
     Quat q;
     if (tr > 0) {
@@ -118,6 +113,14 @@ inline Quat LookRotation(const Vec3& forward, const Vec3& up = {0, 1, 0}) {
         q = {(m02 + m20) / s, (m12 + m21) / s, 0.25f * s, (m10 - m01) / s};
     }
     return Normalize(q);
+}
+
+// Rotation that looks along `forward` (-Z) with `up`.
+inline Quat LookRotation(const Vec3& forward, const Vec3& up = {0, 1, 0}) {
+    const Vec3 f = Normalize(forward);
+    const Vec3 r = Normalize(Cross(up, -f));
+    const Vec3 u = Cross(-f, r);
+    return QuatFromColumns(r, u, -f);
 }
 
 struct Pose {

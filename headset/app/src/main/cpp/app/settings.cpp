@@ -54,6 +54,10 @@ json HeadsetSettings::ToJson() const {
             {"vrMenuHints", vrMenuHints},
             {"manualPc", manualPc},
             {"deviceSecret", deviceSecret},
+            {"keyboardCutout", keyboardCutout},
+            {"keyboardPos", keyboardPos},
+            {"keyboardRot", keyboardRot},
+            {"keyboardSize", keyboardSize},
             {"cloudServer", cloudServer},
             {"cloudRefreshToken", cloudRefreshToken},
             {"cloudUserName", cloudUserName},
@@ -121,6 +125,10 @@ void HeadsetSettings::FromJson(const json& j) {
     get("vrMenuHints", vrMenuHints);
     get("manualPc", manualPc);
     get("deviceSecret", deviceSecret);
+    get("keyboardCutout", keyboardCutout);
+    get("keyboardPos", keyboardPos);
+    get("keyboardRot", keyboardRot);
+    get("keyboardSize", keyboardSize);
     get("cloudServer", cloudServer);
     get("cloudRefreshToken", cloudRefreshToken);
     get("cloudUserName", cloudUserName);

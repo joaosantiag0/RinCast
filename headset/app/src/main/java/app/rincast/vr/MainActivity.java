@@ -5,6 +5,7 @@ import android.app.NativeActivity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.hardware.input.InputManager;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
@@ -18,6 +19,9 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
 import android.speech.tts.TextToSpeech;
+import android.view.InputDevice;
+import android.view.KeyEvent;
+import android.view.MotionEvent;
 
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -41,6 +45,7 @@ public class MainActivity extends NativeActivity {
     private WifiManager.WifiLock wifiLock;
     private WifiManager.MulticastLock multicastLock;
     private PowerManager.WakeLock wakeLock;
+    private InputManager.InputDeviceListener inputDeviceListener;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,12 +53,28 @@ public class MainActivity extends NativeActivity {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] {Manifest.permission.RECORD_AUDIO}, 1);
         }
+        // A Bluetooth keyboard can disappear without the window losing focus. Release
+        // everything it had pressed on the PC instead of leaving Super/Ctrl stuck down.
+        final InputManager idm = (InputManager) getSystemService(Context.INPUT_SERVICE);
+        if (idm != null) {
+            inputDeviceListener = new InputManager.InputDeviceListener() {
+                @Override public void onInputDeviceAdded(int deviceId) { }
+                @Override public void onInputDeviceRemoved(int deviceId) { nativeReleaseAllKeys(); }
+                @Override public void onInputDeviceChanged(int deviceId) { }
+            };
+            idm.registerInputDeviceListener(inputDeviceListener, null);
+        }
     }
 
     @Override
     protected void onDestroy() {
         setStreamingLocks(false);
         setUsbNetwork(false);
+        final InputManager idm = (InputManager) getSystemService(Context.INPUT_SERVICE);
+        if (idm != null && inputDeviceListener != null) {
+            idm.unregisterInputDeviceListener(inputDeviceListener);
+            inputDeviceListener = null;
+        }
         super.onDestroy();
     }
 
@@ -314,4 +335,170 @@ public class MainActivity extends NativeActivity {
             if (conn != null) conn.disconnect();
         }
     }
+
+    // ---- Physical mouse and keyboard forwarding -----------------------------------
+    private boolean pointerCaptureRequested = false;
+    private float lastMouseX = 0, lastMouseY = 0;
+
+    public void setPointerCapture(boolean enable) {
+        pointerCaptureRequested = enable;
+        runOnUiThread(() -> {
+            if (getWindow() != null && getWindow().getDecorView() != null) {
+                if (enable) {
+                    getWindow().getDecorView().setOnCapturedPointerListener((view, event) -> handlePointerEvent(event));
+                    getWindow().getDecorView().requestPointerCapture();
+                } else {
+                    getWindow().getDecorView().releasePointerCapture();
+                }
+            }
+        });
+    }
+
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && pointerCaptureRequested) {
+            if (getWindow() != null && getWindow().getDecorView() != null) {
+                getWindow().getDecorView().setOnCapturedPointerListener((view, event) -> handlePointerEvent(event));
+                getWindow().getDecorView().requestPointerCapture();
+            }
+        } else if (!hasFocus) {
+            nativeReleaseAllKeys();
+        }
+    }
+
+    private static int mapMouseButton(int btn) {
+        switch (btn) {
+            case MotionEvent.BUTTON_PRIMARY: return 0;   // Left
+            case MotionEvent.BUTTON_SECONDARY: return 1; // Right
+            case MotionEvent.BUTTON_TERTIARY: return 2;  // Middle
+            case MotionEvent.BUTTON_BACK: return 3;      // Back / X1
+            case MotionEvent.BUTTON_FORWARD: return 4;   // Forward / X2
+            default: return -1;
+        }
+    }
+
+    private boolean handlePointerEvent(MotionEvent event) {
+        final int source = event.getSource();
+        final boolean isMouse = (source & InputDevice.SOURCE_MOUSE) != 0 ||
+                                (source & 0x00020004) != 0 ||
+                                (source & InputDevice.SOURCE_CLASS_POINTER) != 0 ||
+                                (source & InputDevice.SOURCE_CLASS_TRACKBALL) != 0;
+        if (!isMouse) {
+            return false;
+        }
+        final int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_MOVE || action == MotionEvent.ACTION_HOVER_MOVE) {
+            float dx = event.getAxisValue(MotionEvent.AXIS_RELATIVE_X);
+            float dy = event.getAxisValue(MotionEvent.AXIS_RELATIVE_Y);
+            if (dx == 0 && dy == 0) {
+                if (getWindow() != null && getWindow().getDecorView() != null && getWindow().getDecorView().hasPointerCapture()) {
+                    dx = event.getX();
+                    dy = event.getY();
+                } else {
+                    float x = event.getX();
+                    float y = event.getY();
+                    if (lastMouseX != 0 || lastMouseY != 0) {
+                        dx = x - lastMouseX;
+                        dy = y - lastMouseY;
+                    }
+                    lastMouseX = x;
+                    lastMouseY = y;
+                }
+            }
+            if (dx != 0 || dy != 0) {
+                nativeOnMouseMove(dx, dy);
+            }
+            return true;
+        } else if (action == MotionEvent.ACTION_SCROLL) {
+            float vscroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL);
+            float hscroll = event.getAxisValue(MotionEvent.AXIS_HSCROLL);
+            if (vscroll != 0 || hscroll != 0) {
+                nativeOnMouseWheel(hscroll, vscroll);
+            }
+            return true;
+        } else if (action == MotionEvent.ACTION_BUTTON_PRESS || action == MotionEvent.ACTION_BUTTON_RELEASE) {
+            int btn = event.getActionButton();
+            int mapped = mapMouseButton(btn);
+            if (mapped >= 0) {
+                nativeOnMouseButton(mapped, action == MotionEvent.ACTION_BUTTON_PRESS);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        if (handlePointerEvent(event)) return true;
+        return super.dispatchGenericMotionEvent(event);
+    }
+
+    @Override
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        if (event.getToolType(0) == MotionEvent.TOOL_TYPE_MOUSE) {
+            if (pointerCaptureRequested && getWindow() != null && getWindow().getDecorView() != null) {
+                if (!getWindow().getDecorView().hasPointerCapture()) {
+                    getWindow().getDecorView().requestPointerCapture();
+                }
+            }
+            int action = event.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
+                lastMouseX = event.getX();
+                lastMouseY = event.getY();
+                nativeOnMouseButton(0, true);
+                return true;
+            } else if (action == MotionEvent.ACTION_UP) {
+                nativeOnMouseButton(0, false);
+                return true;
+            }
+        }
+        return super.dispatchTouchEvent(event);
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        final int keyCode = event.getKeyCode();
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN ||
+            keyCode == KeyEvent.KEYCODE_VOLUME_MUTE || keyCode == KeyEvent.KEYCODE_POWER ||
+            keyCode == KeyEvent.KEYCODE_HEADSETHOOK) {
+            return super.dispatchKeyEvent(event);
+        }
+        if ((event.getFlags() & KeyEvent.FLAG_CANCELED) != 0) {
+            // The keyboard went away or Android lost the key-up: nothing stays held on the PC.
+            nativeReleaseAllKeys();
+            return super.dispatchKeyEvent(event);
+        }
+        // NativeActivity's input queue sees most physical keys first. Let native code map
+        // them, raw scan codes included; OnPhysicalKey deduplicates events seen twice.
+        if (nativeOnPhysicalKey(keyCode, event.getScanCode(), event.getMetaState(),
+                                event.getAction(), event.getFlags())) {
+            return true;
+        }
+        // Dead keys and composed accents can arrive as ACTION_MULTIPLE or with no key
+        // code at all. There is no physical key to forward then, only characters.
+        final int action = event.getAction();
+        if (action == KeyEvent.ACTION_DOWN || action == KeyEvent.ACTION_MULTIPLE) {
+            String text = action == KeyEvent.ACTION_MULTIPLE ? event.getCharacters() : null;
+            if (text == null) {
+                final int unicode = event.getUnicodeChar();
+                if (unicode > 0 && !Character.isISOControl(unicode)) {
+                    text = new String(Character.toChars(unicode));
+                }
+            }
+            if (text != null && !text.isEmpty()) {
+                nativeOnText(text);
+                return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    private static native void nativeOnMouseMove(float dx, float dy);
+    private static native void nativeOnMouseButton(int button, boolean down);
+    private static native void nativeOnMouseWheel(float dx, float dy);
+    private static native boolean nativeOnPhysicalKey(int keyCode, int scanCode, int metaState,
+                                                      int action, int flags);
+    private static native void nativeOnText(String text);
+    private static native void nativeReleaseAllKeys();
 }

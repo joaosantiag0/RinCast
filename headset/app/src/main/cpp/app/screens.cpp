@@ -769,6 +769,16 @@ bool PageDesktop(Ui& ui, const Rect& body) {
     if (b.Add(ui, "arrange", Tr("btn.recenter"))) app.Recenter();
     l.y += 64;
 
+    l.y += 24;
+    Section(ui, l, Tr("desktop.keyboardSection"));
+    changed |= CheckRow(ui, l, "kbcutout", Tr("desktop.keyboardCutout"), s.keyboardCutout, Tr("desktop.keyboardCutoutHint"));
+    l.y += 8;
+    ButtonRow kbRow{l.x, l.y};
+    if (kbRow.Add(ui, "kbdraw", Tr("vrOverlay.drawCutout"))) {
+        app.ToggleWindow("home", false);
+        app.StartKeyboardCutoutDraw();
+    }
+
     Column c{body.x + w + gap, body.y - scroll, w};
     Section(ui, c, Tr("desktop.qualitySection"));
     Label(ui, c, Tr("desktop.fpsLabel"));
@@ -1135,10 +1145,11 @@ void BuildDock(Ui& ui, const Rect& r) {
     };
     // The labels are i18n keys; "SteamVR" isn't one and Tr passes it through.
     const Btn btns[] = {{"monitors", "desktop_windows", "nav.desktop"}, {"games", "sports_esports", "nav.games"},
-                        {"keyboard", "keyboard", "dock.keyboard"}, {"menu", "apps", "dock.menu"},
+                        {"keyboard", "keyboard", "dock.keyboard"},
+                        {"menu", "apps", "dock.menu"},
                         {"steamvr", "rocket_launch", app.VrRunning() ? "btn.backToVr" : "dock.steamvr"}, {"recenter", "center_focus_strong", "btn.recenter"},
                         {"disconnect", "logout", "btn.disconnect"}};
-    const float bw = 100, gap = 4;
+    const float bw = 88, gap = 4;
     float x = r.x + 224;
     int index = 0;
     for (const auto& b : btns) {
@@ -1307,6 +1318,14 @@ void BuildVrOverlay(Ui& ui, const Rect& r) {
         app.SaveSettings();
         app.ToggleWindow("stats", app.Settings().showStats);
     }
+    if (b.Add(ui, "kb-cutout", app.Settings().keyboardCutout ? Tr("vrOverlay.hideCutout") : Tr("vrOverlay.showCutout"))) {
+        app.Settings().keyboardCutout = !app.Settings().keyboardCutout;
+        app.SaveSettings();
+    }
+    if (b.Add(ui, "kb-draw", Tr("vrOverlay.drawCutout"))) {
+        app.ToggleWindow("vr-overlay", false);
+        app.StartKeyboardCutoutDraw();
+    }
     const bool armed = ui.Time() - g_disconnectArmed < 4.f;
     const Rect dis{r.Right() - pad - 180, r.y + 88, 180, 54};
     if (ui.Button("disconnect", dis, armed ? Tr("btn.pressAgain") : Tr("btn.disconnect"), nullptr, armed ? ButtonStyle::Danger : ButtonStyle::Secondary)) {
@@ -1357,7 +1376,7 @@ void Build(App& app, WindowManager& wm) {
     Window* launch = make("launch", 760, 108, 0.65f, false, BuildLaunch);
     launch->showChrome = false;
     launch->movable = false;
-    make("vr-overlay", 960, 166, 0.94f, false, BuildVrOverlay);
+    make("vr-overlay", 1160, 166, 1.10f, false, BuildVrOverlay);
 }
 
 }  // namespace rv::screens

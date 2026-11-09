@@ -63,6 +63,12 @@ struct HeadsetSettings {
     int vrMenuHints = 0;                // times the "how to open the menu" hint was shown
     kb::Config keyboard;                // the keyboard's own settings
 
+    // Keyboard Passthrough Portal
+    bool keyboardCutout = false;
+    std::vector<float> keyboardPos = {0.f, -0.3f, -0.45f};
+    std::vector<float> keyboardRot = {-0.7071068f, 0.f, 0.f, 0.7071068f};
+    std::vector<float> keyboardSize = {0.42f, 0.18f};
+
     // Account
     std::string cloudServer = "https://rincast.com";
     std::string cloudRefreshToken;

@@ -35,17 +35,328 @@ void ToggleMenu(App& app);
 
 static const char* kVersion = RINCAST_VERSION_STRING;
 
-App::~App() { Shutdown(); }
+App* App::s_instance = nullptr;
+
+App::~App() {
+    if (s_instance == this) s_instance = nullptr;
+    Shutdown();
+}
 
 #ifdef __ANDROID__
-App::App(android_app* androidApp) : m_android(androidApp), m_assets(androidApp->activity->assetManager) {}
+#include <android/input.h>
+#include <android/keycodes.h>
+
+App::App(android_app* androidApp) : m_android(androidApp), m_assets(androidApp->activity->assetManager) {
+    s_instance = this;
+}
+
+static uint16_t MapAndroidKeyToWindowsVk(int32_t keyCode) {
+    if (keyCode >= AKEYCODE_A && keyCode <= AKEYCODE_Z) return uint16_t(0x41 + (keyCode - AKEYCODE_A));
+    if (keyCode >= AKEYCODE_0 && keyCode <= AKEYCODE_9) return uint16_t(0x30 + (keyCode - AKEYCODE_0));
+    if (keyCode >= AKEYCODE_F1 && keyCode <= AKEYCODE_F12) return uint16_t(0x70 + (keyCode - AKEYCODE_F1));
+    if (keyCode >= AKEYCODE_NUMPAD_0 && keyCode <= AKEYCODE_NUMPAD_9) return uint16_t(0x60 + (keyCode - AKEYCODE_NUMPAD_0));
+    switch (keyCode) {
+        case AKEYCODE_ENTER:
+        case AKEYCODE_NUMPAD_ENTER: return 0x0D;
+        case AKEYCODE_ESCAPE: return 0x1B;
+        case AKEYCODE_TAB: return 0x09;
+        case AKEYCODE_SPACE: return 0x20;
+        case AKEYCODE_DEL: return 0x08;
+        case AKEYCODE_FORWARD_DEL: return 0x2E;
+        case AKEYCODE_INSERT: return 0x2D;
+
+        case AKEYCODE_SHIFT_LEFT:
+        case AKEYCODE_SHIFT_RIGHT: return 0x10;
+        case AKEYCODE_CTRL_LEFT:
+        case AKEYCODE_CTRL_RIGHT: return 0x11;
+        case AKEYCODE_ALT_LEFT:
+        case AKEYCODE_ALT_RIGHT: return 0x12;
+        case AKEYCODE_META_LEFT:
+        case AKEYCODE_META_RIGHT: return 0x5B;
+        case AKEYCODE_CAPS_LOCK: return 0x14;
+        case AKEYCODE_SCROLL_LOCK: return 0x91;
+        case AKEYCODE_NUM_LOCK: return 0x90;
+        case AKEYCODE_SYSRQ: return 0x2C;
+        case AKEYCODE_BREAK: return 0x13;
+
+        case AKEYCODE_DPAD_UP: return 0x26;
+        case AKEYCODE_DPAD_DOWN: return 0x28;
+        case AKEYCODE_DPAD_LEFT: return 0x25;
+        case AKEYCODE_DPAD_RIGHT: return 0x27;
+        case AKEYCODE_PAGE_UP: return 0x21;
+        case AKEYCODE_PAGE_DOWN: return 0x22;
+        case AKEYCODE_MOVE_HOME: return 0x24;
+        case AKEYCODE_MOVE_END: return 0x23;
+
+        case AKEYCODE_GRAVE: return 0xC0;
+        case AKEYCODE_MINUS: return 0xBD;
+        case AKEYCODE_EQUALS: return 0xBB;
+        case AKEYCODE_LEFT_BRACKET: return 0xDB;
+        case AKEYCODE_RIGHT_BRACKET: return 0xDD;
+        case AKEYCODE_BACKSLASH: return 0xDC;
+        case AKEYCODE_SEMICOLON: return 0xBA;
+        case AKEYCODE_APOSTROPHE: return 0xDE;
+        case AKEYCODE_COMMA: return 0xBC;
+        case AKEYCODE_PERIOD: return 0xBE;
+        case AKEYCODE_SLASH: return 0xBF;
+
+        case AKEYCODE_NUMPAD_ADD: return 0x6B;
+        case AKEYCODE_NUMPAD_SUBTRACT: return 0x6D;
+        case AKEYCODE_NUMPAD_MULTIPLY: return 0x6A;
+        case AKEYCODE_NUMPAD_DIVIDE: return 0x6F;
+        case AKEYCODE_NUMPAD_DOT: return 0x6E;
+
+        default: return 0;
+    }
+}
+
+// Android's key codes are physical US-layout positions, but not every physical key has
+// one: dead keys (the accents on ABNT2/JIS layouts), the 102nd key and some vendor keys
+// arrive as AKEYCODE_UNKNOWN or as an ACTION_MULTIPLE event. The raw scan code of a
+// Bluetooth HID keyboard is the Linux evdev key code, which is layout independent, so it
+// still identifies the key. Sending the physical key is what a passthrough must do: the
+// PC's own layout then decides whether it types '[', '´' or a dead accent.
+static uint16_t MapLinuxScanCodeToWindowsVk(int32_t s) {
+    static const char kTopRow[] = "QWERTYUIOP";
+    static const char kHomeRow[] = "ASDFGHJKL";
+    static const char kBottomRow[] = "ZXCVBNM";
+    if (s >= 16 && s <= 25) return uint8_t(kTopRow[s - 16]);     // Q..P
+    if (s >= 30 && s <= 38) return uint8_t(kHomeRow[s - 30]);    // A..L
+    if (s >= 44 && s <= 50) return uint8_t(kBottomRow[s - 44]);  // Z..M
+    if (s >= 2 && s <= 10) return uint16_t('1' + (s - 2));
+    if (s >= 59 && s <= 68) return uint16_t(0x70 + (s - 59));    // F1..F10
+    switch (s) {
+        case 1: return 0x1B;   // Escape
+        case 11: return '0';
+        case 12: return 0xBD;  // -
+        case 13: return 0xBB;  // =
+        case 14: return 0x08;  // Backspace
+        case 15: return 0x09;  // Tab
+        case 26: return 0xDB;  // [ / ´ on ABNT2
+        case 27: return 0xDD;  // ] / [ on ABNT2
+        case 28: return 0x0D;  // Enter
+        case 29: return 0x11;  // Left Ctrl
+        case 39: return 0xBA;  // ; / Ç on ABNT2
+        case 40: return 0xDE;  // ' / ~ on ABNT2
+        case 41: return 0xC0;  // ` / ' on ABNT2
+        case 42: return 0x10;  // Left Shift
+        case 43: return 0xDC;  // \ / ] on ABNT2
+        case 51: return 0xBC;  // ,
+        case 52: return 0xBE;  // .
+        case 53: return 0xBF;  // /
+        case 54: return 0x10;  // Right Shift
+        case 55: return 0x6A;  // numpad *
+        case 56: return 0x12;  // Left Alt
+        case 57: return 0x20;  // Space
+        case 58: return 0x14;  // Caps Lock
+        case 69: return 0x90;  // Num Lock
+        case 70: return 0x91;  // Scroll Lock
+        case 71: return 0x67;  // numpad 7
+        case 72: return 0x68;
+        case 73: return 0x69;
+        case 74: return 0x6D;  // numpad -
+        case 75: return 0x64;  // numpad 4
+        case 76: return 0x65;
+        case 77: return 0x66;
+        case 78: return 0x6B;  // numpad +
+        case 79: return 0x61;  // numpad 1
+        case 80: return 0x62;
+        case 81: return 0x63;
+        case 82: return 0x60;  // numpad 0
+        case 83: return 0x6E;  // numpad .
+        case 86: return 0xE2;  // VK_OEM_102, the extra ABNT2/JIS key
+        case 87: return 0x7A;  // F11
+        case 88: return 0x7B;  // F12
+        case 96: return 0x0D;  // numpad Enter
+        case 97: return 0x11;  // Right Ctrl
+        case 98: return 0x6F;  // numpad /
+        case 99: return 0x2C;  // Print Screen
+        case 100: return 0x12; // Right Alt
+        case 102: return 0x24; // Home
+        case 103: return 0x26; // Up
+        case 104: return 0x21; // Page Up
+        case 105: return 0x25; // Left
+        case 106: return 0x27; // Right
+        case 107: return 0x23; // End
+        case 108: return 0x28; // Down
+        case 109: return 0x22; // Page Down
+        case 110: return 0x2D; // Insert
+        case 111: return 0x2E; // Delete
+        case 119: return 0x13; // Pause
+        case 125:               // Left Meta / Super / Win
+        case 126: return 0x5B; // Right Meta / Super / Win
+        default: return 0;
+    }
+}
+
+static uint16_t PhysicalVk(int32_t keyCode, int32_t scanCode) {
+    const uint16_t vk = MapAndroidKeyToWindowsVk(keyCode);
+    return vk ? vk : MapLinuxScanCodeToWindowsVk(scanCode);
+}
+
+static int32_t OnInputEvent(android_app* app, AInputEvent* event) {
+    auto* self = static_cast<App*>(app->userData);
+    if (!self) return 0;
+    return self->HandleAndroidInput(event);
+}
+
+int32_t App::HandleAndroidInput(const AInputEvent* event) {
+    const int32_t type = AInputEvent_getType(event);
+    if (type == AINPUT_EVENT_TYPE_KEY) {
+        return OnPhysicalKey(AKeyEvent_getKeyCode(event), AKeyEvent_getScanCode(event),
+                             AKeyEvent_getMetaState(event), AKeyEvent_getAction(event),
+                             AKeyEvent_getFlags(event))
+                   ? 1
+                   : 0;
+    } else if (type == AINPUT_EVENT_TYPE_MOTION) {
+        const int32_t source = AInputEvent_getSource(event);
+        const bool isMouse = (source & AINPUT_SOURCE_MOUSE) != 0 ||
+                             (source & 0x00020004) != 0 ||
+                             (source & AINPUT_SOURCE_CLASS_POINTER) != 0 ||
+                             (source & AINPUT_SOURCE_TRACKBALL) != 0;
+        if (isMouse) {
+            const int32_t action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
+            int32_t currentButtons = AMotionEvent_getButtonState(event);
+            if (action == AMOTION_EVENT_ACTION_DOWN) {
+                if (!(currentButtons & AMOTION_EVENT_BUTTON_PRIMARY)) {
+                    currentButtons |= AMOTION_EVENT_BUTTON_PRIMARY;
+                }
+            } else if (action == AMOTION_EVENT_ACTION_UP) {
+                currentButtons &= ~AMOTION_EVENT_BUTTON_PRIMARY;
+            }
+
+            int32_t changed = currentButtons ^ m_lastButtonState;
+            if (changed != 0) {
+                struct ButtonMapping {
+                    int32_t mask;
+                    int index;
+                };
+                static const ButtonMapping mappings[] = {
+                    { AMOTION_EVENT_BUTTON_PRIMARY, 0 },
+                    { AMOTION_EVENT_BUTTON_SECONDARY, 1 },
+                    { AMOTION_EVENT_BUTTON_TERTIARY, 2 },
+                    { AMOTION_EVENT_BUTTON_BACK, 3 },
+                    { AMOTION_EVENT_BUTTON_FORWARD, 4 },
+                };
+                for (const auto& m : mappings) {
+                    if (changed & m.mask) {
+                        bool down = (currentButtons & m.mask) != 0;
+                        RC_LOGI("Physical button %d: %d", m.index, down);
+                        OnMouseButton(m.index, down);
+                    }
+                }
+                m_lastButtonState = currentButtons;
+            }
+
+            if (action == AMOTION_EVENT_ACTION_MOVE || action == AMOTION_EVENT_ACTION_HOVER_MOVE) {
+                float dx = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RELATIVE_X, 0);
+                float dy = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_RELATIVE_Y, 0);
+                if (dx == 0 && dy == 0) {
+                    const float x = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_X, 0);
+                    const float y = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_Y, 0);
+                    if (m_lastMouseX != 0 || m_lastMouseY != 0) {
+                        dx = x - m_lastMouseX;
+                        dy = y - m_lastMouseY;
+                    }
+                    m_lastMouseX = x;
+                    m_lastMouseY = y;
+                }
+                if (dx != 0 || dy != 0) {
+                    OnMouseMove(dx, dy);
+                }
+                return 1;
+            } else if (action == AMOTION_EVENT_ACTION_SCROLL) {
+                float vscroll = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_VSCROLL, 0);
+                float hscroll = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_HSCROLL, 0);
+                if (vscroll != 0 || hscroll != 0) {
+                    RC_LOGI("Physical scroll: %f %f", hscroll, vscroll);
+                    OnMouseWheel(hscroll, vscroll);
+                }
+                return 1;
+            }
+            if (changed != 0) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+void App::SyncModifiers(int32_t metaState, uint16_t skipVk) {
+    if (m_mode != Mode::Desktop) return;
+    struct Mod {
+        uint16_t vk;
+        int32_t bit;
+    };
+    static const Mod kMods[] = {
+        {0x10, AMETA_SHIFT_ON}, {0x11, AMETA_CTRL_ON},
+        {0x12, AMETA_ALT_ON},   {0x5B, AMETA_META_ON},
+    };
+    for (const Mod& m : kMods) {
+        if (m.vk == skipVk) continue;
+        bool held;
+        {
+            std::lock_guard lock(m_keysMutex);
+            held = m_keysDown.count(m.vk) != 0;
+        }
+        // Only ever *release* here. Pressing a modifier from metaState alone is
+        // speculative: a stale META_META_ON left by a dropped Bluetooth key-up would
+        // invent a Command press and turn every letter into Cmd+E / Cmd+D / Cmd+F.
+        // A stuck modifier is cleared on the very next event that doesn't report it.
+        if ((metaState & m.bit) == 0 && held) {
+            RC_LOGI("Physical keyboard: releasing stuck modifier 0x%X", m.vk);
+            OnKey(m.vk, false);
+        }
+    }
+}
+
+bool App::OnPhysicalKey(int32_t keyCode, int32_t scanCode, int32_t metaState, int32_t action,
+                        int32_t flags) {
+    // Volume, power and headset-hook keys belong to the headset, not to the PC.
+    if (keyCode == AKEYCODE_VOLUME_UP || keyCode == AKEYCODE_VOLUME_DOWN ||
+        keyCode == AKEYCODE_VOLUME_MUTE || keyCode == AKEYCODE_POWER ||
+        keyCode == AKEYCODE_HEADSETHOOK) {
+        return false;
+    }
+    // Android sends a canceled event instead of a key-up when a Bluetooth device goes
+    // away or drops an event. Whatever was held on the PC has to be released now.
+    if (flags & AKEY_EVENT_FLAG_CANCELED) {
+        ReleaseAllKeys();
+        return true;
+    }
+    // ACTION_MULTIPLE carries composed characters (dead keys); Java sends those as text.
+    if (action != AKEY_EVENT_ACTION_DOWN && action != AKEY_EVENT_ACTION_UP) return false;
+
+    const uint16_t vk = PhysicalVk(keyCode, scanCode);
+    if (vk == 0) {
+        RC_LOGW("Physical key not mapped: android %d, scan %d", keyCode, scanCode);
+        return false;  // unknown physical key: let Java try the Unicode fallback
+    }
+    if (action == AKEY_EVENT_ACTION_DOWN) {
+        RC_LOGD("Physical key down: vk 0x%X (android %d, scan %d, meta 0x%X)", vk,
+                keyCode, scanCode, uint32_t(metaState));
+    }
+
+    // The modifier's own down/up is authoritative: metaState is sampled before the
+    // key-up is applied, so it still claims the modifier is held on that event.
+    const bool isModifier = vk == 0x10 || vk == 0x11 || vk == 0x12 || vk == 0x5B;
+    SyncModifiers(metaState, isModifier ? vk : 0);
+    OnKey(vk, action == AKEY_EVENT_ACTION_DOWN);
+    return true;
+}
 
 static void OnAppCmd(android_app* app, int32_t cmd) {
     auto* self = static_cast<App*>(app->userData);
     (void)self;
     switch (cmd) {
         case APP_CMD_RESUME: RC_LOGI("onResume"); break;
-        case APP_CMD_PAUSE: RC_LOGI("onPause"); break;
+        case APP_CMD_PAUSE:
+            RC_LOGI("onPause");
+            if (self) self->ReleaseAllKeys();
+            break;
+        case APP_CMD_LOST_FOCUS:
+            if (self) self->ReleaseAllKeys();
+            break;
         case APP_CMD_DESTROY: RC_LOGI("onDestroy"); break;
         default: break;
     }
@@ -72,6 +383,7 @@ void App::Run() {
     m_android->activity->vm->AttachCurrentThread(&env, nullptr);
     m_android->userData = this;
     m_android->onAppCmd = OnAppCmd;
+    m_android->onInputEvent = OnInputEvent;
     Init();
     while (!m_exit) {
         HandleAndroidEvents();
@@ -100,7 +412,9 @@ std::atomic<bool> g_quit{false};
 void OnSignal(int) { g_quit = true; }
 }  // namespace
 
-App::App(android_app* androidApp) : m_android(androidApp) {}
+App::App(android_app* androidApp) : m_android(androidApp) {
+    s_instance = this;
+}
 
 void App::HandleAndroidEvents() {
     if (g_quit) m_exit = true;
@@ -218,6 +532,7 @@ void App::Shutdown() {
     m_xr.DestroySwapchain(m_statsLayer);
     m_xr.Shutdown();
     Platform::SetStreamingLocks(false);
+    Platform::SetPointerCapture(false);
 }
 
 void App::SaveSettings() { m_settings.Save(m_settingsPath); }
@@ -406,6 +721,19 @@ void App::Recenter() {
     LayoutHome(true);
 }
 
+void App::StartKeyboardCutoutDraw() {
+    m_cutoutDrawing = true;
+    m_cutoutDrawHand = -1;
+    m_cutoutStartPos = {};
+    m_cutoutCurrentPos = {};
+    PostNotice(Tr("cutout.hint"), "info");
+}
+
+void App::CancelKeyboardCutoutDraw() {
+    m_cutoutDrawing = false;
+    m_cutoutDrawHand = -1;
+}
+
 void App::UpdateScreenShape(float previousDistance) {
     const float distance = m_settings.screenDistance;
     for (auto& [id, d] : m_desktopStreams) {
@@ -464,6 +792,94 @@ void App::ApplyAccessibility() {
 void App::SendKey(uint16_t vk, bool down) { m_client.SendControl({{"type", rc::msg::kKey}, {"vk", vk}, {"down", down}}); }
 
 void App::SendText(const std::string& text) { m_client.SendControl({{"type", rc::msg::kText}, {"text", text}}); }
+
+void App::OnMouseMove(float dx, float dy) {
+    if (m_mode != Mode::Desktop || m_desktopStreams.empty()) return;
+    m_lastPhysicalMouseNs = rc::NowNs();
+
+    std::vector<uint8_t> order;
+    for (auto& [id, d] : m_desktopStreams) order.push_back(id);
+    if (order.empty()) return;
+
+    if (!m_desktopStreams.count(m_mouseMonitorStreamId)) {
+        m_mouseMonitorStreamId = order[0];
+        m_mouseU = 0.5f;
+        m_mouseV = 0.5f;
+    }
+
+    const auto& d = m_desktopStreams[m_mouseMonitorStreamId];
+    const float w = float(std::max(1, d.width));
+    const float h = float(std::max(1, d.height));
+
+    m_mouseU += dx / w;
+    m_mouseV += dy / h;
+
+    auto it = std::find(order.begin(), order.end(), m_mouseMonitorStreamId);
+    size_t idx = (it != order.end()) ? size_t(std::distance(order.begin(), it)) : 0;
+
+    if (m_mouseU > 1.0f) {
+        if (idx + 1 < order.size()) {
+            m_mouseMonitorStreamId = order[idx + 1];
+            m_mouseU -= 1.0f;
+        } else {
+            m_mouseU = 1.0f;
+        }
+    } else if (m_mouseU < 0.0f) {
+        if (idx > 0) {
+            m_mouseMonitorStreamId = order[idx - 1];
+            m_mouseU += 1.0f;
+        } else {
+            m_mouseU = 0.0f;
+        }
+    }
+    m_mouseV = std::clamp(m_mouseV, 0.0f, 1.0f);
+
+    rc::PointerPayload p{};
+    p.monitorStreamId = m_mouseMonitorStreamId;
+    p.visible = 1;
+    p.u = m_mouseU;
+    p.v = m_mouseV;
+    p.inputSeq = ++m_pointerSeq;
+    m_client.SendPointer(p);
+}
+
+void App::OnMouseButton(int button, bool down) {
+    if (m_mode != Mode::Desktop) return;
+    m_lastPhysicalMouseNs = rc::NowNs();
+    m_client.SendControl({{"type", rc::msg::kMouseButton}, {"button", button}, {"down", down}});
+}
+
+void App::OnMouseWheel(float dx, float dy) {
+    if (m_mode != Mode::Desktop) return;
+    m_lastPhysicalMouseNs = rc::NowNs();
+    m_client.SendControl({{"type", rc::msg::kMouseWheel}, {"dx", dx}, {"dy", dy * m_settings.scrollSpeed}});
+}
+
+void App::OnKey(uint16_t vk, bool down) {
+    if (m_mode != Mode::Desktop || vk == 0) return;
+    // Hold the lock through the send so down/up from the two input threads can't be
+    // reordered: a late key-down after its key-up would leave the key stuck on the PC.
+    std::lock_guard lock(m_keysMutex);
+    if (down) {
+        if (!m_keysDown.insert(vk).second) return;
+    } else {
+        if (!m_keysDown.erase(vk)) return;
+    }
+    m_client.SendControl({{"type", rc::msg::kKey}, {"vk", vk}, {"down", down}});
+}
+
+void App::ReleaseAllKeys() {
+    std::lock_guard lock(m_keysMutex);
+    for (uint16_t vk : m_keysDown) {
+        m_client.SendControl({{"type", rc::msg::kKey}, {"vk", vk}, {"down", false}});
+    }
+    m_keysDown.clear();
+}
+
+void App::OnText(const std::string& text) {
+    if (m_mode != Mode::Desktop) return;
+    m_client.SendControl({{"type", rc::msg::kText}, {"text", text}});
+}
 
 void App::PostNotice(const std::string& text, const std::string& level, const std::string& action) {
     // An error, or one with something to do, stays until it's answered.
@@ -573,6 +989,10 @@ void App::EnterMode(Mode m) {
     const Mode prev = m_mode;
     m_mode = m;
     m_modeTime = 0;
+    if (prev == Mode::Desktop && m != Mode::Desktop) {
+        ReleaseAllKeys();
+    }
+    Platform::SetPointerCapture(m == Mode::Desktop);
     switch (m) {
         case Mode::Home:
             for (auto& w : m_windows.All()) w->visible = false;
@@ -1100,7 +1520,9 @@ void App::Frame() {
 
     // Environment / passthrough.
     const Environment env = EnvironmentFromKey(m_settings.environment);
-    m_xr.SetPassthrough(env == Environment::Passthrough && m_mode != Mode::Vr);
+    const bool needPassthrough = (env == Environment::Passthrough && m_mode != Mode::Vr) ||
+                                 m_settings.keyboardCutout || m_cutoutDrawing;
+    m_xr.SetPassthrough(needPassthrough);
 
     // During a game with nothing on top, drawing an empty eye layer over the stream would
     // only cost GPU time and heat. The performance overlay alone doesn't need it either: it
@@ -1111,7 +1533,8 @@ void App::Frame() {
     bool anyWindow = false;
     for (const auto& w : m_windows.All())
         if (w.get() != stats) anyWindow = anyWindow || w->visible || w->appear > 0.01f;
-    const bool vrClear = m_mode == Mode::Vr && m_vrHasFrame && !m_vrOverlay && m_warp <= 0.001f && !anyWindow;
+    const bool vrClear = m_mode == Mode::Vr && m_vrHasFrame && !m_vrOverlay && m_warp <= 0.001f && !anyWindow &&
+                         !m_cutoutDrawing && !m_settings.keyboardCutout;
     const bool statsShown = stats && (stats->visible || stats->appear > 0.01f);
     const bool statsLayer = vrClear && statsShown && stats->visible && stats->appear > 0.98f;
     UpdateStatsLayer(stats, statsLayer, dt);
@@ -1132,9 +1555,70 @@ void App::Frame() {
     SteerVrTiming(frame);
     if (m_mode == Mode::Vr && m_settings.frameGeneration && !m_vrLatched) GenerateFrame(frame);
     BuildLayers(frame);
-    const bool alpha = m_xr.PassthroughActive() || !m_underlays.empty();
+    const bool alpha = m_xr.PassthroughActive() || !m_underlays.empty() || m_settings.keyboardCutout || m_cutoutDrawing;
     m_xr.EndFrame(frame, m_underlays, alpha, m_overlays, uiLayer);
 }
+
+namespace {
+struct CutoutGeometry {
+    Vec3 center;
+    Quat rot;
+    Vec3 deskRight;
+    Vec3 deskFwd;
+    float width = 0.f;
+    float depth = 0.f;
+};
+
+// Option 1: The user traces the front edge of the keyboard (e.g. from Left Ctrl to NumPad Enter).
+// The vector of the drag directly sets the physical angle and width of the keyboard on the desk.
+static CutoutGeometry ComputeCutoutGeometry(const Vec3& p1, const Vec3& p2, const Pose& head) {
+    CutoutGeometry geo;
+
+    const Vec3 delta = p2 - p1;
+    const Vec3 deltaH(delta.x, 0.f, delta.z);
+    float L = Length(deltaH);
+    if (L < 0.04f) L = 0.04f;
+
+    const Vec3 D = deltaH * (1.f / L);
+    const Vec3 U(0.f, 1.f, 0.f);
+
+    // Forward vector perpendicular to the drag on the horizontal desk: (D.z, 0, -D.x)
+    const Vec3 F_cand(D.z, 0.f, -D.x);
+
+    // Vector from user's head to the midpoint of the stroke:
+    const Vec3 T((p1.x + p2.x) * 0.5f - head.position.x, 0.f, (p1.z + p2.z) * 0.5f - head.position.z);
+
+    // Ensure forward vector points away from the user into the desk:
+    if (Dot(F_cand, T) < 0.f) {
+        geo.deskFwd = -F_cand;
+        geo.deskRight = -D;
+    } else {
+        geo.deskFwd = F_cand;
+        geo.deskRight = D;
+    }
+
+    const float dDrag = Dot(delta, geo.deskFwd);
+    if (std::fabs(dDrag) > 0.07f) {
+        // User dragged diagonally to define depth explicitly:
+        geo.depth = std::clamp(std::fabs(dDrag), 0.10f, 0.50f);
+        geo.width = std::clamp(std::fabs(Dot(delta, geo.deskRight)) + 0.02f, 0.16f, 0.90f);
+        geo.center = (p1 + p2) * 0.5f;
+    } else {
+        // User traced across the keyboard keys: center the 18 cm depth directly on the stroke,
+        // so it extends comfortably forward (towards F-keys) and backward (towards spacebar).
+        geo.width = std::clamp(L + 0.03f, 0.16f, 0.90f);
+        geo.depth = 0.18f;
+        geo.center = (p1 + p2) * 0.5f;
+    }
+
+    // Height is strictly horizontal at the average hand height:
+    geo.center.y = (p1.y + p2.y) * 0.5f;
+
+    // Columns: X -> deskRight (stroke direction), Y -> deskFwd (desk depth), Z -> U (0, 1, 0):
+    geo.rot = QuatFromColumns(geo.deskRight, geo.deskFwd, U);
+    return geo;
+}
+}  // namespace
 
 void App::UpdateInput(const FrameState& frame, float dt) {
     const bool uiActive = m_mode != Mode::Vr || m_vrOverlay;
@@ -1185,6 +1669,53 @@ void App::UpdateInput(const FrameState& frame, float dt) {
         }
         m_handState[h].menu = in.menu;
     }
+
+    // Keyboard cutout pinch/drag creation mode
+    if (m_cutoutDrawing) {
+        for (int h = 0; h < 2; h++) {
+            const HandInput& in = m_input.Hand(h);
+            const auto& r = m_rays[h];
+            if (in.menu && !m_handState[h].menu) {
+                CancelKeyboardCutoutDraw();
+                return;
+            }
+            if (!in.active) continue;
+
+            // Sample point right at the physical controller tip / hand pinch:
+            const Vec3 pt = in.aim.position + in.aim.Forward() * 0.03f;
+
+            const bool pinch = in.pinch > 0.55f || r.triggerDown;
+
+            if (m_cutoutDrawHand < 0) {
+                if (pinch) {
+                    m_cutoutDrawHand = h;
+                    m_cutoutStartPos = pt;
+                    m_cutoutCurrentPos = pt;
+                    if (m_settings.haptics) m_input.Vibrate(h, 0.25f, 0.02f);
+                }
+            } else if (m_cutoutDrawHand == h) {
+                m_cutoutCurrentPos = pt;
+                if (!pinch) {
+                    const Vec3 p1 = m_cutoutStartPos;
+                    const Vec3 p2 = m_cutoutCurrentPos;
+                    if (Length(p2 - p1) > 0.05f) {
+                        const CutoutGeometry geo = ComputeCutoutGeometry(p1, p2, frame.head);
+
+                        m_settings.keyboardPos = {geo.center.x, geo.center.y, geo.center.z};
+                        m_settings.keyboardRot = {geo.rot.x, geo.rot.y, geo.rot.z, geo.rot.w};
+                        m_settings.keyboardSize = {geo.width, geo.depth};
+                        m_settings.keyboardCutout = true;
+                        SaveSettings();
+                        if (m_settings.haptics) m_input.Vibrate(h, 0.4f, 0.04f);
+                        Platform::PlaySound(Platform::Sound::Click);
+                    }
+                    m_cutoutDrawing = false;
+                    m_cutoutDrawHand = -1;
+                }
+            }
+        }
+        return;
+    }
     // One-handed route to the same menu for the right hand: hold A and B.
     {
         const HandInput& right = m_input.Hand(1);
@@ -1213,6 +1744,9 @@ void App::UpdateInput(const FrameState& frame, float dt) {
 
     // ---- PC mouse from laser over a monitor ----
     if (m_mode != Mode::Desktop || m_windows.Dragging()) return;
+    const bool physicalMouseActive = (rc::NowNs() - m_lastPhysicalMouseNs) < 1'500'000'000LL;
+    if (physicalMouseActive && !m_rays[0].triggerDown && !m_rays[1].triggerDown) return;
+
     int mouseHand = -1;
     if (m_settings.desktopInput) {
         for (int h = 1; h >= 0; h--) {
@@ -1232,6 +1766,9 @@ void App::UpdateInput(const FrameState& frame, float dt) {
     }
     const WindowHit& hit = m_hits[mouseHand];
     const int streamId = std::stoi(hit.window->id.substr(8));
+    m_mouseMonitorStreamId = uint8_t(streamId);
+    m_mouseU = hit.uv.x;
+    m_mouseV = hit.uv.y;
     rc::PointerPayload p{};
     p.monitorStreamId = uint8_t(streamId);
     p.visible = 1;
@@ -1536,6 +2073,9 @@ void App::LatchVideo(const FrameState& frame) {
                     m_scene.BlitExternal(dec->Texture(), m_vrSwapchain.width, m_vrSwapchain.height, dec->Crop(), 0, 0, 1, 1,
                                          foveation);
                 }
+                if (m_settings.keyboardCutout && !m_cutoutDrawing) {
+                    PunchKeyboardCutoutVr(fbo, frame);
+                }
                 m_xr.ReleaseImage(m_vrSwapchain);
             }
             m_vrHasFrame = true;
@@ -1739,11 +2279,14 @@ void App::RenderEyes(const FrameState& frame, float dt) {
 
         m_scene.SetViewProjection(viewProj, v.pose.position);
         m_windows.Draw(m_scene);
+        if (m_settings.keyboardCutout || m_cutoutDrawing) {
+            DrawKeyboardCutout(v);
+        }
 
         // Lasers.
         for (int h = 0; h < 2; h++) {
             const auto& r = m_rays[h];
-            if (!r.valid) continue;
+            if (!r.valid || m_cutoutDrawing) continue;
             const WindowHit& hit = m_hits[h];
             const float len = hit.window ? hit.distance : 2.5f;
             const Vec3 end = r.origin + r.dir * len;
@@ -1761,6 +2304,89 @@ void App::RenderEyes(const FrameState& frame, float dt) {
         }
     }
     (void)dt;
+}
+
+void App::DrawKeyboardCutout(const EyeView& v) {
+    if (m_cutoutDrawing) {
+        if (m_cutoutDrawHand >= 0) {
+            const CutoutGeometry geo = ComputeCutoutGeometry(m_cutoutStartPos, m_cutoutCurrentPos, m_head);
+
+            const Vec3 rx = geo.deskRight * (geo.width * 0.5f);
+            const Vec3 ry = geo.deskFwd * (geo.depth * 0.5f);
+            const Vec3 c0 = geo.center - rx - ry;
+            const Vec3 c1 = geo.center + rx - ry;
+            const Vec3 c2 = geo.center + rx + ry;
+            const Vec3 c3 = geo.center - rx + ry;
+
+            const Color drawCol(0.2f, 0.9f, 1.0f, 0.85f);
+            m_scene.Beam(c0, c1, 0.0035f, drawCol, drawCol);
+            m_scene.Beam(c1, c2, 0.0035f, drawCol, drawCol);
+            m_scene.Beam(c2, c3, 0.0035f, drawCol, drawCol);
+            m_scene.Beam(c3, c0, 0.0035f, drawCol, drawCol);
+
+            PanelDraw p;
+            p.pose = {geo.rot, geo.center};
+            p.width = geo.width;
+            p.height = geo.depth;
+            p.cornerRadius = 0.012f;
+            p.holePunch = true;
+            p.holeFromAlpha = false;
+            p.opacity = 1.0f;
+            m_scene.Panel(p);
+        } else {
+            for (int h = 0; h < 2; h++) {
+                const auto& in = m_input.Hand(h);
+                if (in.active) {
+                    const Vec3 tip = in.aim.position + in.aim.Forward() * 0.03f;
+                    m_scene.ControllerOrb(Pose{{}, tip}, Color(0.2f, 0.9f, 1.0f, 0.9f));
+                }
+            }
+        }
+        return;
+    }
+
+    if (m_settings.keyboardCutout && m_settings.keyboardPos.size() >= 3 && m_settings.keyboardRot.size() >= 4 && m_settings.keyboardSize.size() >= 2) {
+        const Vec3 pos{m_settings.keyboardPos[0], m_settings.keyboardPos[1], m_settings.keyboardPos[2]};
+        const Quat rot{m_settings.keyboardRot[0], m_settings.keyboardRot[1], m_settings.keyboardRot[2], m_settings.keyboardRot[3]};
+        const float w = m_settings.keyboardSize[0], h = m_settings.keyboardSize[1];
+
+        if (m_mode != Mode::Vr) {
+            PanelDraw p;
+            p.pose = {rot, pos};
+            p.width = w;
+            p.height = h;
+            p.cornerRadius = 0.015f;
+            p.holePunch = true;
+            p.holeFromAlpha = false;
+            p.opacity = 1.0f;
+            m_scene.Panel(p);
+        }
+    }
+}
+
+void App::PunchKeyboardCutoutVr(GLuint fbo, const FrameState& frame) {
+    if (m_settings.keyboardPos.size() < 3 || m_settings.keyboardRot.size() < 4 || m_settings.keyboardSize.size() < 2) return;
+    const Vec3 pos{m_settings.keyboardPos[0], m_settings.keyboardPos[1], m_settings.keyboardPos[2]};
+    const Quat rot{m_settings.keyboardRot[0], m_settings.keyboardRot[1], m_settings.keyboardRot[2], m_settings.keyboardRot[3]};
+    const float w = m_settings.keyboardSize[0], h = m_settings.keyboardSize[1];
+
+    PanelDraw p;
+    p.pose = {rot, pos};
+    p.width = w;
+    p.height = h;
+    p.cornerRadius = 0.015f;
+    p.holePunch = true;
+    p.holeFromAlpha = false;
+    p.opacity = 1.0f;
+
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    for (int eye = 0; eye < 2; eye++) {
+        const EyeView& v = frame.eyes[eye];
+        glViewport(eye * m_vrSwapchain.width / 2, 0, m_vrSwapchain.width / 2, m_vrSwapchain.height);
+        m_scene.SetViewProjection(v.projection * v.view, v.pose.position);
+        m_scene.Panel(p);
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
 void App::UpdateStatsLayer(Window* stats, bool active, float dt) {
@@ -1855,6 +2481,9 @@ void App::BuildLayers(const FrameState& frame) {
         m_vrLayer.space = m_xr.AppSpace();
         m_vrLayer.viewCount = 2;
         m_vrLayer.views = m_vrViews;
+        if (m_settings.keyboardCutout || m_cutoutDrawing) {
+            m_vrLayer.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+        }
         // Sharpening shows up compression artifacts, so only with bits to spare.
         if (m_xr.LayerSettings() && m_stats.mbps >= 40) {
             XrCompositionLayerSettingsFB s{XR_TYPE_COMPOSITION_LAYER_SETTINGS_FB};

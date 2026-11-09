@@ -28,6 +28,10 @@
 #include "latency.h"
 #include "settings.h"
 
+#ifdef __ANDROID__
+#include <android/input.h>
+#endif
+
 struct android_app;
 
 namespace rv {
@@ -72,6 +76,14 @@ class App {
     explicit App(android_app* androidApp);
     ~App();
     void Run();
+#ifdef __ANDROID__
+    int32_t HandleAndroidInput(const ::AInputEvent* event);
+    // One event from a physical (USB/Bluetooth) keyboard, from either the native input
+    // queue or MainActivity.dispatchKeyEvent. Both paths may see the same event; OnKey
+    // deduplicates it. Returns false when Java should try to send the event as text.
+    bool OnPhysicalKey(int32_t keyCode, int32_t scanCode, int32_t metaState, int32_t action,
+                       int32_t flags);
+#endif
 
     // ---- used by the UI builders (screens.cpp) ----
     HeadsetSettings& Settings() { return m_settings; }
@@ -118,9 +130,20 @@ class App {
     bool MonitorsVisible() const { return m_monitorsVisible; }
     void SendKey(uint16_t vk, bool down);
     void SendText(const std::string& text);
+    static App* Instance() { return s_instance; }
+    void OnMouseMove(float dx, float dy);
+    void OnMouseButton(int button, bool down);
+    void OnMouseWheel(float dx, float dy);
+    void OnKey(uint16_t vk, bool down);
+    void OnText(const std::string& text);
+    void ReleaseAllKeys();
     void PostNotice(const std::string& text, const std::string& level = "info", const std::string& action = {});
     void DismissNotice();
     void RunAction(const std::string& action);
+
+    void StartKeyboardCutoutDraw();
+    void CancelKeyboardCutoutDraw();
+    bool IsDrawingCutout() const { return m_cutoutDrawing; }
 
     const json& ServerInfo() const { return m_serverInfo; }
     const json& ServerStats() const { return m_serverStats; }
@@ -168,6 +191,8 @@ class App {
     void EnterMode(Mode m);
     void LatchVideo(const FrameState& frame);
     void RenderEyes(const FrameState& frame, float dt);
+    void DrawKeyboardCutout(const EyeView& v);
+    void PunchKeyboardCutoutVr(GLuint fbo, const FrameState& frame);
     void BuildLayers(const FrameState& frame);
     void SendHello();
     void CreateWindows();
@@ -242,6 +267,11 @@ class App {
     float m_abHeld = 0;
     std::string m_spokenProblem;
     Vec3 m_smoothDir[2];
+    // Keyboard cutout pinch-drag state
+    bool m_cutoutDrawing = false;
+    int m_cutoutDrawHand = -1;
+    Vec3 m_cutoutStartPos;
+    Vec3 m_cutoutCurrentPos;
     void ReconnectTick();
     std::mutex m_decoderMutex;
     std::map<uint8_t, std::shared_ptr<VideoDecoder>> m_decoders;
@@ -342,6 +372,24 @@ class App {
     XrCompositionLayerProjectionView m_vrViews[2]{};
     std::vector<const XrCompositionLayerBaseHeader*> m_underlays;
     std::vector<const XrCompositionLayerBaseHeader*> m_overlays;
+
+    static App* s_instance;
+    uint8_t m_mouseMonitorStreamId = 0;
+    float m_mouseU = 0.5f;
+    float m_mouseV = 0.5f;
+    float m_lastMouseX = 0;
+    float m_lastMouseY = 0;
+    int32_t m_lastButtonState = 0;
+    int64_t m_lastPhysicalMouseNs = 0;
+    // Key events arrive on the native input queue thread and on the Java UI thread.
+    std::mutex m_keysMutex;
+    std::set<uint16_t> m_keysDown;
+#ifdef __ANDROID__
+    // Android reports the held modifiers on every key event. Reconcile them with the
+    // keys we actually sent, so a dropped key-up (common with Bluetooth keyboards) can't
+    // leave e.g. Super held down on the PC and turn a later 'e' into Win+E.
+    void SyncModifiers(int32_t metaState, uint16_t skipVk);
+#endif
 };
 
 }  // namespace rv

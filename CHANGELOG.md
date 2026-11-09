@@ -7,6 +7,8 @@ Notable changes to RinCast. Versions follow [Semantic Versioning](https://semver
 ### Added
 
 - Desktop: "Send mouse input" toggle under Desktop, allowing users to view PC monitors without passing laser pointer movements, clicks or scrolls to the computer.
+- Physical USB and Bluetooth keyboard and mouse passthrough directly from the headset to the connected computer while in Desktop mode, with the mouse cursor bounded to virtual monitors.
+- Physical keyboard passthrough cutout option in the headset menu to view the desk keyboard in VR and Desktop spaces, calibrated by tracing across the front edge of the keyboard.
 
 ### Changed
 
@@ -29,6 +31,20 @@ Notable changes to RinCast. Versions follow [Semantic Versioning](https://semver
 
   Not ported: voice typing, Steam's emoticons and Steam Controller typing. Not tested on a headset
   yet.
+
+### Fixed
+
+- A Bluetooth keyboard could leave Super (Win/Command) held down on the PC after a
+  dropped key-up, turning a later `e`, `d` or `f` into Super+E / Super+D / Super+F.
+  Stuck modifiers are now released on the next key event that doesn't report them, and
+  everything held is released when the keyboard disappears, an event is canceled, or the
+  headset loses focus. A modifier is never *pressed* from `metaState` alone, so a stale
+  modifier flag can't invent a Super press.
+- Dead keys (the accent keys on ABNT2 and JIS layouts) were dropped when Android reported
+  them without a key code. Physical keys now fall back to the raw HID scan code, so those
+  keys reach the PC as the `[ ] ; ' \ , . /` positions and the PC's own layout produces the
+  accents; `ACTION_MULTIPLE` composed characters are sent as text.
+
 
 ## 1.1.2 - 2026-11-07
 

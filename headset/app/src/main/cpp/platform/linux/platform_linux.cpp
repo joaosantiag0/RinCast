@@ -109,6 +109,7 @@ std::string Platform::SystemLocale() {
 }
 bool Platform::HasMicPermission() { return true; }  // no runtime permissions on SteamOS
 void Platform::SetStreamingLocks(bool) {}
+void Platform::SetPointerCapture(bool) {}
 void Platform::PlaySound(Sound) {}
 void Platform::RequestPermissions(const std::vector<std::string>&) {}
 void Platform::SetUsbNetwork(bool) {}

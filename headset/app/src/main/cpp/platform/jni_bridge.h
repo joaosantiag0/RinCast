@@ -34,6 +34,7 @@ class Platform {
     static std::string SystemLocale();
     static bool HasMicPermission();
     static void SetStreamingLocks(bool enable);
+    static void SetPointerCapture(bool enable);
     enum class Sound { Click = 0, Connected = 1, Problem = 2 };
     static void PlaySound(Sound sound);
     // Asks for those that aren't granted yet; each headset family names its own.

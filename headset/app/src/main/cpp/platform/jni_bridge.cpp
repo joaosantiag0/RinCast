@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdio>
 
+#include "app/app.h"
 #include "rc/platform.h"
 
 namespace rv {
@@ -76,6 +77,15 @@ void Platform::SetStreamingLocks(bool enable) {
     jclass cls = env->GetObjectClass(g_activity);
     jmethodID m = env->GetMethodID(cls, "setStreamingLocks", "(Z)V");
     env->CallVoidMethod(g_activity, m, jboolean(enable));
+    env->DeleteLocalRef(cls);
+}
+
+void Platform::SetPointerCapture(bool enable) {
+    JniScope scope;
+    JNIEnv* env = scope.env();
+    jclass cls = env->GetObjectClass(g_activity);
+    jmethodID m = env->GetMethodID(cls, "setPointerCapture", "(Z)V");
+    if (m) env->CallVoidMethod(g_activity, m, jboolean(enable));
     env->DeleteLocalRef(cls);
 }
 
@@ -165,3 +175,51 @@ HttpResult Platform::Http(const std::string& method, const std::string& url, con
 }
 
 }  // namespace rv
+
+extern "C" {
+
+JNIEXPORT void JNICALL Java_app_rincast_vr_MainActivity_nativeOnMouseMove(JNIEnv*, jclass, jfloat dx, jfloat dy) {
+    if (rv::App* app = rv::App::Instance()) {
+        app->OnMouseMove(dx, dy);
+    }
+}
+
+JNIEXPORT void JNICALL Java_app_rincast_vr_MainActivity_nativeOnMouseButton(JNIEnv*, jclass, jint button, jboolean down) {
+    if (rv::App* app = rv::App::Instance()) {
+        app->OnMouseButton(button, down);
+    }
+}
+
+JNIEXPORT void JNICALL Java_app_rincast_vr_MainActivity_nativeOnMouseWheel(JNIEnv*, jclass, jfloat dx, jfloat dy) {
+    if (rv::App* app = rv::App::Instance()) {
+        app->OnMouseWheel(dx, dy);
+    }
+}
+
+JNIEXPORT jboolean JNICALL Java_app_rincast_vr_MainActivity_nativeOnPhysicalKey(
+    JNIEnv*, jclass, jint keyCode, jint scanCode, jint metaState, jint action, jint flags) {
+    if (rv::App* app = rv::App::Instance()) {
+        return app->OnPhysicalKey(keyCode, scanCode, metaState, action, flags) ? JNI_TRUE : JNI_FALSE;
+    }
+    return JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL Java_app_rincast_vr_MainActivity_nativeOnText(JNIEnv* env, jclass, jstring text) {
+    if (!text) return;
+    const char* chars = env->GetStringUTFChars(text, nullptr);
+    if (chars) {
+        std::string str(chars);
+        env->ReleaseStringUTFChars(text, chars);
+        if (rv::App* app = rv::App::Instance()) {
+            app->OnText(str);
+        }
+    }
+}
+
+JNIEXPORT void JNICALL Java_app_rincast_vr_MainActivity_nativeReleaseAllKeys(JNIEnv*, jclass) {
+    if (rv::App* app = rv::App::Instance()) {
+        app->ReleaseAllKeys();
+    }
+}
+
+}  // extern "C"
