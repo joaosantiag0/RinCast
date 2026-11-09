@@ -241,7 +241,6 @@ int32_t App::HandleAndroidInput(const AInputEvent* event) {
                 for (const auto& m : mappings) {
                     if (changed & m.mask) {
                         bool down = (currentButtons & m.mask) != 0;
-                        RC_LOGI("Physical button %d: %d", m.index, down);
                         OnMouseButton(m.index, down);
                     }
                 }
@@ -269,7 +268,6 @@ int32_t App::HandleAndroidInput(const AInputEvent* event) {
                 float vscroll = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_VSCROLL, 0);
                 float hscroll = AMotionEvent_getAxisValue(event, AMOTION_EVENT_AXIS_HSCROLL, 0);
                 if (vscroll != 0 || hscroll != 0) {
-                    RC_LOGI("Physical scroll: %f %f", hscroll, vscroll);
                     OnMouseWheel(hscroll, vscroll);
                 }
                 return 1;
@@ -332,11 +330,6 @@ bool App::OnPhysicalKey(int32_t keyCode, int32_t scanCode, int32_t metaState, in
         RC_LOGW("Physical key not mapped: android %d, scan %d", keyCode, scanCode);
         return false;  // unknown physical key: let Java try the Unicode fallback
     }
-    if (action == AKEY_EVENT_ACTION_DOWN) {
-        RC_LOGD("Physical key down: vk 0x%X (android %d, scan %d, meta 0x%X)", vk,
-                keyCode, scanCode, uint32_t(metaState));
-    }
-
     // The modifier's own down/up is authoritative: metaState is sampled before the
     // key-up is applied, so it still claims the modifier is held on that event.
     const bool isModifier = vk == 0x10 || vk == 0x11 || vk == 0x12 || vk == 0x5B;
@@ -886,7 +879,6 @@ void App::OnKey(uint16_t vk, bool down, int32_t repeatCount) {
         if (repeatCount <= 0 || !IsRepeatableKey(vk)) return;
         if (m_lastRepeatCount[vk] == repeatCount) return;
         m_lastRepeatCount[vk] = repeatCount;
-        RC_LOGD("Physical key repeat: vk 0x%X (%d)", vk, repeatCount);
     } else {
         m_lastRepeatCount.erase(vk);  // a fresh press restarts the repeat sequence
     }
